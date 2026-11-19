@@ -20,7 +20,8 @@ export function useFasts() {
   return useMemo(() => metrics.filter((m) => m.kind === 'ayuno').map((m) => {
     const start = new Date(m.measured_at).getTime();
     const end = m.meta?.end ? new Date(m.meta.end).getTime() : null;
-    return { ...m, start, end, target: Number(m.value) || 16, ms: (end || Date.now()) - start };
+    const target = m.value == null ? 16 : Number(m.value); // 0 = ayuno libre, sin objetivo
+    return { ...m, start, end, target, libre: target === 0, ms: (end || Date.now()) - start };
   }).sort((a, b) => b.start - a.start), [metrics]);
 }
 
@@ -38,7 +39,7 @@ export function FastCard() {
   const active = fasts.find((f) => !f.end);
   const lastDone = fasts.find((f) => f.end);
   const lastMeal = useMemo(() => meals.find((m) => sumItems(m.items).kcal > 0 && new Date(m.eaten_at).getTime() <= now), [meals, now]);
-  const [target, setTarget] = useState(() => { try { return Number(localStorage.getItem('ayuno-objetivo')) || 16; } catch { return 16; } });
+  const [target, setTarget] = useState(() => { try { const v = localStorage.getItem('ayuno-objetivo'); return v != null && v !== '' && !Number.isNaN(Number(v)) ? Number(v) : 16; } catch { return 16; } });
   const [desde, setDesde] = useState('comida');
   const [editing, setEditing] = useState(false);
   const [startEdit, setStartEdit] = useState('');
@@ -59,22 +60,23 @@ export function FastCard() {
   if (active) {
     const ms = now - active.start;
     const goalMs = active.target * 3600e3;
-    const pct = Math.max(0, Math.min(100, (ms / goalMs) * 100));
-    const listo = ms >= goalMs;
+    const libre = active.libre;
+    const pct = libre ? 100 : Math.max(0, Math.min(100, (ms / goalMs) * 100));
+    const listo = !libre && ms >= goalMs;
     const fin = new Date(active.start + goalMs);
     return (
       <section className="card stack12 fastcard">
         <div className="row between baseline">
           <span className="cardtitle row gap6"><Icon name="clock" size={18} className="fast-ic" />Ayuno en curso</span>
-          <span className="muted small">objetivo {active.target} h</span>
+          <span className="muted small">{libre ? 'libre, sin objetivo' : `objetivo ${active.target} h`}</span>
         </div>
         <div className="row between baseline wrap gap8">
           <span className="fast-num">{horasMin(ms)}</span>
           <span className={'small strong' + (listo ? ' accent' : ' muted')}>
-            {listo ? '¡Objetivo cumplido! 🎉' : `faltan ${horasMin(goalMs - ms)} · ${dayKey(fin) === dayKey() ? 'hoy' : dayLabel(dayKey(fin)).toLowerCase()} ${timeLabel(fin)}`}
+            {libre ? 'cortalo cuando quieras' : listo ? '¡Objetivo cumplido! 🎉' : `faltan ${horasMin(goalMs - ms)} · ${dayKey(fin) === dayKey() ? 'hoy' : dayLabel(dayKey(fin)).toLowerCase()} ${timeLabel(fin)}`}
           </span>
         </div>
-        <div className="bar fastbar"><div style={{ width: pct + '%', background: listo ? 'var(--accent)' : 'var(--fast)' }} /></div>
+        {!libre && <div className="bar fastbar"><div style={{ width: pct + '%', background: listo ? 'var(--accent)' : 'var(--fast)' }} /></div>}
         <span className="muted small">Empezó {dayLabel(dayKey(active.start)).toLowerCase()} a las {timeLabel(active.start)}<br />Si registrás una comida, el ayuno termina solo</span>
         {editing ? (
           <div className="row gap8 wrap">
@@ -101,6 +103,7 @@ export function FastCard() {
         {desdeComida != null && <span className="muted small">última comida hace {horasMin(desdeComida)}</span>}
       </div>
       <div className="chiprow">
+        <button type="button" className={'pill small' + (target === 0 ? ' on' : '')} onClick={() => setTarget(0)}>Libre</button>
         {PROTOCOLOS.map((h) => <button key={h} type="button" className={'pill small' + (target === h ? ' on' : '')} onClick={() => setTarget(h)}>{h}:{24 - h > 0 ? 24 - h : 0}</button>)}
       </div>
       {lastMeal && (
@@ -109,10 +112,10 @@ export function FastCard() {
           <button type="button" className={desde === 'ahora' ? 'on' : ''} onClick={() => setDesde('ahora')}>Desde ahora</button>
         </div>
       )}
-      <button type="button" className="btn primary" disabled={busy} onClick={empezar}><Icon name="clock" size={18} />Empezar ayuno de {target} h</button>
+      <button type="button" className="btn primary" disabled={busy} onClick={empezar}><Icon name="clock" size={18} />{target ? `Empezar ayuno de ${target} h` : 'Empezar ayuno libre'}</button>
       {lastDone && (
         <span className="muted small">
-          Último: {horasMin(lastDone.ms)} {lastDone.ms >= lastDone.target * 3600e3 ? '✓ cumplido' : `(objetivo ${lastDone.target} h)`}, terminó {dayLabel(dayKey(lastDone.end)).toLowerCase()} {timeLabel(lastDone.end)}
+          Último: {horasMin(lastDone.ms)} {lastDone.libre ? '(libre)' : lastDone.ms >= lastDone.target * 3600e3 ? '✓ cumplido' : `(objetivo ${lastDone.target} h)`}, terminó {dayLabel(dayKey(lastDone.end)).toLowerCase()} {timeLabel(lastDone.end)}
         </span>
       )}
     </section>
@@ -126,7 +129,8 @@ export function fastStats(fasts, desdeMs) {
   return {
     done,
     cantidad: done.length,
-    cumplidos: done.filter((f) => f.ms >= f.target * 3600e3).length,
+    cumplidos: done.filter((f) => !f.libre && f.ms >= f.target * 3600e3).length,
+    conObjetivo: done.filter((f) => !f.libre),
     promedio: horas.length ? horas.reduce((a, b) => a + b, 0) / horas.length : null,
     maximo: horas.length ? Math.max(...horas) : null
   };

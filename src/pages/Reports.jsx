@@ -161,11 +161,11 @@ export default function Reports() {
         <section className="card stack12">
           <div className="row between baseline wrap gap8">
             <span className="cardtitle">Ayunos (horas)</span>
-            {fs.cantidad > 0 && <span className="muted small">{fs.cantidad} ayunos · {fs.cumplidos} cumplidos · promedio {horasMin(fs.promedio * 3600e3)}</span>}
+            {fs.cantidad > 0 && <span className="muted small">{fs.cantidad} ayunos · {fs.cumplidos} cumplidos{fs.done.some((f) => f.libre) ? ' · azul = libre' : ''} · promedio {horasMin(fs.promedio * 3600e3)}</span>}
           </div>
           {fs.cantidad ? (
-            <BarChart data={[...fs.done].reverse().map((f) => ({ label: shortDate(dayKey(new Date(f.end))), value: Math.round((f.ms / 3600e3) * 10) / 10, color: f.ms >= f.target * 3600e3 ? 'var(--accent)' : 'var(--fast)' }))}
-              goal={Math.round(fs.done.reduce((a, f) => a + f.target, 0) / fs.done.length)} unit="h" dec={1} goalLabel="objetivo" />
+            <BarChart data={[...fs.done].reverse().map((f) => ({ label: shortDate(dayKey(new Date(f.end))), value: Math.round((f.ms / 3600e3) * 10) / 10, color: f.libre ? 'var(--water)' : f.ms >= f.target * 3600e3 ? 'var(--accent)' : 'var(--fast)' }))}
+              goal={fs.conObjetivo.length ? Math.round(fs.conObjetivo.reduce((a, f) => a + f.target, 0) / fs.conObjetivo.length) : 0} unit="h" dec={1} goalLabel="objetivo" />
           ) : <p className="muted small">Todavía no hay ayunos terminados en este período. Se empiezan desde la pantalla Hoy.</p>}
         </section>
 

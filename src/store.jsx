@@ -130,7 +130,7 @@ export function StoreProvider({ children }) {
     if (!id && kcal > 0) {
       const at = new Date(rest.eaten_at || Date.now());
       const activo = metricsRef.current.find((m) => m.kind === 'ayuno' && !m.meta?.end && new Date(m.measured_at).getTime() < at.getTime() + 60000);
-      if (activo) await supabase.from('peso_metrics').update({ meta: { ...activo.meta, end: at.toISOString() } }).eq('id', activo.id);
+      if (activo) await supabase.from('peso_metrics').update({ meta: { ...activo.meta, end: new Date(Math.max(at.getTime(), new Date(activo.measured_at).getTime())).toISOString() } }).eq('id', activo.id);
     }
     await loadAll();
     return mealId;
