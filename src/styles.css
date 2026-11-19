@@ -266,3 +266,4 @@ code { background: var(--line-soft); padding: 2px 6px; border-radius: 6px; }
 .fasemark.on { background: var(--ink); }
 .fasemark i { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); font-style: normal; font-size: 10.5px; color: var(--muted); white-space: nowrap; }
 .fasebox { background: #FDF3E6; border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; line-height: 1.4; }
+.brandimg { width: 34px; height: 34px; border-radius: 9px; }

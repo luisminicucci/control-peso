@@ -45,7 +45,7 @@ export default function App() {
   return (
     <div className="shell">
       <aside className="sidebar">
-        <div className="brand"><span className="brandmark"><Icon name="scale" size={18} /></span><span>Registro Corporal</span></div>
+        <div className="brand"><img className="brandimg" src="./icon.svg" alt="" /><span>Registro Corporal</span></div>
         <button type="button" className="btn primary sideadd" onClick={() => nav('/registrar?voz=1')}><Icon name="mic" size={20} />Registrar comida</button>
         <nav className="sidenav">
           {NAV.map((n) => (
