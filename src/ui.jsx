@@ -20,7 +20,8 @@ const paths = {
   bell: <><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0" /></>,
   edit: <><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></>,
   left: <path d="m15 18-6-6 6-6" />,
-  check: <path d="M20 6 9 17l-5-5" />
+  check: <path d="M20 6 9 17l-5-5" />,
+  clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>
 };
 
 export function Icon({ name, size = 24, ...rest }) {

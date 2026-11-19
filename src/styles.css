@@ -22,6 +22,7 @@
   --c-carb: #E0A030;
   --c-fat: #D0643C;
   --chart-dots: #9FB5AE;
+  --fast: #D98A2B;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 * { box-sizing: border-box; }
@@ -250,3 +251,10 @@ code { background: var(--line-soft); padding: 2px 6px; border-radius: 6px; }
 }
 .formactions { display: flex; gap: 10px; position: sticky; bottom: calc(12px + var(--safe-bottom)); }
 .formactions .btn { min-height: 52px; font-size: 16px; }
+
+/* ayuno */
+.fast-ic { color: var(--fast); }
+.fast-num { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
+.fastbar { height: 10px; border-radius: 5px; }
+.fastbar > div { border-radius: 5px; }
+.fastcard .segmented button { font-size: 12.5px; padding: 0 6px; }

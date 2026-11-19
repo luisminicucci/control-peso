@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { api, useStore } from '../store.jsx';
 import { ACTIVIDAD, addDays, dayKey, fmt, fmtL, lastNDays, series, shortDate, suggestGoals, tragos, trend } from '../lib.js';
 import { BarChart, Icon, LineChart, PageHead } from '../ui.jsx';
+import { fastStats, horasMin, useFasts } from './Fast.jsx';
 
 const PERIODOS = [{ d: 7, l: '7 días' }, { d: 14, l: '14 días' }, { d: 30, l: '30 días' }, { d: 90, l: '90 días' }];
 
@@ -12,6 +13,8 @@ export default function Reports() {
   const [iaBusy, setIaBusy] = useState(false);
   const [iaErr, setIaErr] = useState('');
 
+  const fasts = useFasts();
+  const fs = useMemo(() => fastStats(fasts, new Date(lastNDays(n)[0] + 'T00:00').getTime()), [fasts, n]);
   const goal = profile.kcal_goal || 2000;
   const waterGoal = profile.water_goal || 2500;
   const limit = Number(profile.alcohol_week_limit ?? 7);
@@ -84,6 +87,7 @@ export default function Reports() {
         alcohol_tragos_total: Math.round(tragos(r.alc) * 10) / 10,
         cambio_peso_tendencia_kg: r.wChange != null ? Math.round(r.wChange * 10) / 10 : null,
         calorias_por_dia: r.rows.map((x) => ({ dia: x.k, kcal: Math.round(x.kcal || 0), comidas: x.comidas || 0 })),
+        ayunos: fs.cantidad ? { cantidad: fs.cantidad, cumplidos: fs.cumplidos, promedio_horas: Math.round(fs.promedio * 10) / 10 } : null,
         alimentos_con_mas_calorias: r.top.map((f) => ({ alimento: f.name, kcal_total: Math.round(f.kcal), veces: f.veces }))
       };
       setIa(await api('consejos', { datos }));
@@ -152,6 +156,17 @@ export default function Reports() {
         <section className="card stack12">
           <span className="cardtitle">Alcohol por semana (tragos)</span>
           <BarChart data={r.weeks.map((w) => ({ ...w, color: w.value > limit ? 'var(--danger)' : 'var(--alc)' }))} goal={limit} unit="tragos" dec={1} goalLabel="máx." />
+        </section>
+
+        <section className="card stack12">
+          <div className="row between baseline wrap gap8">
+            <span className="cardtitle">Ayunos (horas)</span>
+            {fs.cantidad > 0 && <span className="muted small">{fs.cantidad} ayunos · {fs.cumplidos} cumplidos · promedio {horasMin(fs.promedio * 3600e3)}</span>}
+          </div>
+          {fs.cantidad ? (
+            <BarChart data={[...fs.done].reverse().map((f) => ({ label: shortDate(dayKey(new Date(f.end))), value: Math.round((f.ms / 3600e3) * 10) / 10, color: f.ms >= f.target * 3600e3 ? 'var(--accent)' : 'var(--fast)' }))}
+              goal={Math.round(fs.done.reduce((a, f) => a + f.target, 0) / fs.done.length)} unit="h" dec={1} goalLabel="objetivo" />
+          ) : <p className="muted small">Todavía no hay ayunos terminados en este período. Se empiezan desde la pantalla Hoy.</p>}
         </section>
 
         <section className="card flush">

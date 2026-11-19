@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from './supabase.js';
 import { dailyTotals } from './lib.js';
 
@@ -45,6 +45,8 @@ export function StoreProvider({ children }) {
   const [meals, setMeals] = useState([]);
   const [metrics, setMetrics] = useState([]);
   const [error, setError] = useState('');
+  const metricsRef = useRef([]);
+  metricsRef.current = metrics;
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -123,6 +125,13 @@ export function StoreProvider({ children }) {
       const { error: e3 } = await supabase.from('peso_meal_items').insert(rows);
       if (e3) throw e3;
     }
+    // Si había un ayuno en curso y se registra algo con calorías, el ayuno termina a la hora de esa comida.
+    const kcal = items.reduce((s, it) => s + (Number(it.kcal) || 0), 0);
+    if (!id && kcal > 0) {
+      const at = new Date(rest.eaten_at || Date.now());
+      const activo = metricsRef.current.find((m) => m.kind === 'ayuno' && !m.meta?.end && new Date(m.measured_at).getTime() < at.getTime() + 60000);
+      if (activo) await supabase.from('peso_metrics').update({ meta: { ...activo.meta, end: at.toISOString() } }).eq('id', activo.id);
+    }
     await loadAll();
     return mealId;
   }, [loadAll]);
@@ -141,6 +150,13 @@ export function StoreProvider({ children }) {
     return data;
   }, []);
 
+  const updateMetric = useCallback(async (id, changes) => {
+    const { data, error: e } = await supabase.from('peso_metrics').update(changes).eq('id', id).select().single();
+    if (e) throw e;
+    setMetrics((mt) => mt.map((m) => (m.id === id ? data : m)));
+    return data;
+  }, []);
+
   const deleteMetric = useCallback(async (id) => {
     const { error: e } = await supabase.from('peso_metrics').delete().eq('id', id);
     if (e) throw e;
@@ -153,9 +169,9 @@ export function StoreProvider({ children }) {
     const lastWeight = weights[0] ? Number(weights[0].value) : profile?.start_weight ? Number(profile.start_weight) : null;
     return {
       session, profile, meals, metrics, totals, lastWeight, error, setError, loadAll,
-      saveProfile, saveMeal, deleteMeal, addMetric, deleteMetric
+      saveProfile, saveMeal, deleteMeal, addMetric, updateMetric, deleteMetric
     };
-  }, [session, profile, meals, metrics, error, loadAll, saveProfile, saveMeal, deleteMeal, addMetric, deleteMetric]);
+  }, [session, profile, meals, metrics, error, loadAll, saveProfile, saveMeal, deleteMeal, addMetric, updateMetric, deleteMetric]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
