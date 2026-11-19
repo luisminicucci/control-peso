@@ -8,6 +8,40 @@ import { Icon } from '../ui.jsx';
 
 export const PROTOCOLOS = [12, 14, 16, 18, 20, 24];
 
+// Fases aproximadas del ayuno. Son referencias generales: varían según la persona, lo que comiste antes y la actividad.
+export const FASES = [
+  { h: 0, nombre: 'Digestión', txt: 'Tu cuerpo está digiriendo y usando la energía de la última comida. La insulina está alta.' },
+  { h: 4, nombre: 'Bajada de azúcar', txt: 'Terminó la digestión principal: el azúcar en sangre y la insulina empiezan a bajar.' },
+  { h: 8, nombre: 'Usando reservas', txt: 'El cuerpo tira de las reservas de glucógeno del hígado y empieza a usar más grasa.' },
+  { h: 12, nombre: 'Quema de grasa', txt: 'Con el glucógeno bajo, la grasa pasa a ser una fuente principal de energía.' },
+  { h: 16, nombre: 'Cetosis leve', txt: 'El hígado empieza a producir cetonas a partir de la grasa. Es normal sentir algo de hambre en olas.' },
+  { h: 24, nombre: 'Cetosis', txt: 'Cetosis más marcada y aumento de la autofagia (limpieza celular). Hidratate bien y sumá sal si te mareás.' },
+  { h: 48, nombre: 'Ayuno prolongado', txt: 'Ayuno largo: conviene hacerlo con control médico.' }
+];
+export const faseDe = (ms) => { const h = ms / 3600e3; let i = 0; FASES.forEach((f, j) => { if (h >= f.h) i = j; }); return i; };
+
+function Fases({ ms }) {
+  const i = faseDe(ms);
+  const f = FASES[i], sig = FASES[i + 1];
+  const max = Math.max(24, sig ? sig.h : 48);
+  const pos = (h) => Math.min(100, (h / max) * 100);
+  return (
+    <div className="fases stack8">
+      <div className="fasetrack">
+        <div className="fasefill" style={{ width: pos(ms / 3600e3) + '%' }} />
+        {FASES.filter((x) => x.h > 0 && x.h <= max).map((x) => (
+          <span key={x.h} className={'fasemark' + (ms / 3600e3 >= x.h ? ' on' : '')} style={{ left: pos(x.h) + '%' }} title={x.nombre}><i>{x.h}h</i></span>
+        ))}
+      </div>
+      <div className="fasebox">
+        <span className="strong">Fase: {f.nombre}</span>
+        <span className="small">{f.txt}</span>
+        {sig && <span className="small muted">Próxima: {sig.nombre} en {horasMin(sig.h * 3600e3 - ms)}</span>}
+      </div>
+    </div>
+  );
+}
+
 export function horasMin(ms) {
   const m = Math.max(0, Math.round(ms / 60000));
   const h = Math.floor(m / 60);
@@ -77,6 +111,7 @@ export function FastCard() {
           </span>
         </div>
         {!libre && <div className="bar fastbar"><div style={{ width: pct + '%', background: listo ? 'var(--accent)' : 'var(--fast)' }} /></div>}
+        <Fases ms={ms} />
         <span className="muted small">Empezó {dayLabel(dayKey(active.start)).toLowerCase()} a las {timeLabel(active.start)}<br />Si registrás una comida, el ayuno termina solo</span>
         {editing ? (
           <div className="row gap8 wrap">
