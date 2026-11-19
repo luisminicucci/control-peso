@@ -5,11 +5,18 @@
 // - action "cron": la llama la base cada 15 minutos para mandar los recordatorios de agua.
 // Las claves de IA quedan solo acá (secretos ANTHROPIC_API_KEY o GEMINI_API_KEY), nunca en la web.
 
-import Anthropic from 'npm:@anthropic-ai/sdk@1.3.0';
-import { zodOutputFormat } from 'npm:@anthropic-ai/sdk@1.3.0/helpers/zod';
 import { z } from 'npm:zod@4.1.13';
 import { createClient } from 'npm:@supabase/supabase-js@2.119.0';
-import webpush from 'npm:web-push@3.6.7';
+// Las librerías pesadas (Claude y notificaciones) se cargan solo cuando hacen falta,
+// para no pasarse del límite de memoria/procesador del plan gratis de Supabase.
+const loadAnthropic = async () => {
+  const [{ default: Anthropic }, { zodOutputFormat }] = await Promise.all([
+    import('npm:@anthropic-ai/sdk@1.3.0'),
+    import('npm:@anthropic-ai/sdk@1.3.0/helpers/zod')
+  ]);
+  return { Anthropic, zodOutputFormat };
+};
+const loadWebpush = async () => (await import('npm:web-push@3.6.7')).default;
 
 const MODEL = 'claude-haiku-5-5';
 // Proveedor de IA: si está la clave de Anthropic usa Claude Haiku; si no, Gemini (plan gratis de Google).
@@ -26,6 +33,7 @@ function provider() {
 // Pide a la IA una respuesta JSON que cumpla el esquema.
 async function ia<T extends z.ZodType>(system: string, user: string, schema: T, effort: 'low' | 'medium', maxTokens: number): Promise<z.infer<T>> {
   if (provider() === 'gemini') return gemini(system, user, schema);
+  const { Anthropic, zodOutputFormat } = await loadAnthropic();
   const client = new Anthropic();
   const res = await client.messages.parse({
     model: MODEL,
@@ -142,6 +150,7 @@ async function getConfig(key: string) {
 }
 
 async function vapid() {
+  const webpush = await loadWebpush();
   let pub = await getConfig('vapid_public');
   let priv = await getConfig('vapid_private');
   if (!pub || !priv) {
@@ -167,6 +176,7 @@ const toMin = (hm: string) => { const [h, m] = hm.slice(0, 5).split(':').map(Num
 
 async function cron() {
   await vapid();
+  const webpush = await loadWebpush();
   const { data: subs } = await admin.from('peso_push_subs').select('*');
   if (!subs?.length) return { enviados: 0 };
   const userIds = [...new Set(subs.map((s) => s.user_id))];
