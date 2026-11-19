@@ -1,80 +1,26 @@
 // Función del servidor para Control de Peso (Supabase Edge Function "peso-api").
-// - action "analizar": convierte lo que dijiste ("me comí dos empanadas...") en alimentos con nutrientes, con Claude Haiku o Gemini.
+// - action "analizar": convierte lo que dijiste ("me comí dos empanadas...") en alimentos con nutrientes, con Gemini o Claude Haiku.
 // - action "consejos": mira el resumen de tus últimos días y devuelve sugerencias para bajar de peso.
 // - action "push-key": devuelve la clave pública para activar notificaciones en el celular.
 // - action "cron": la llama la base cada 15 minutos para mandar los recordatorios de agua.
-// Las claves de IA quedan solo acá (secretos ANTHROPIC_API_KEY o GEMINI_API_KEY), nunca en la web.
+// Las claves de IA quedan solo acá (secretos GEMINI_API_KEY o ANTHROPIC_API_KEY), nunca en la web.
+//
+// Está escrita sin librerías externas (salvo las de Claude y notificaciones, que se cargan solo si hacen falta)
+// para entrar holgada en los límites de memoria y procesador del plan gratis de Supabase.
 
-import { z } from 'npm:zod@4.1.13';
-import { createClient } from 'npm:@supabase/supabase-js@2.119.0';
-// Las librerías pesadas (Claude y notificaciones) se cargan solo cuando hacen falta,
-// para no pasarse del límite de memoria/procesador del plan gratis de Supabase.
-const loadAnthropic = async () => {
-  const [{ default: Anthropic }, { zodOutputFormat }] = await Promise.all([
-    import('npm:@anthropic-ai/sdk@1.3.0'),
-    import('npm:@anthropic-ai/sdk@1.3.0/helpers/zod')
-  ]);
-  return { Anthropic, zodOutputFormat };
-};
-const loadWebpush = async () => (await import('npm:web-push@3.6.7')).default;
-
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const MODEL = 'claude-haiku-5-5';
+const GEMINI_MODEL = Deno.env.get('GEMINI_MODEL') || 'gemini-flash-latest';
+
 // Proveedor de IA: si está la clave de Anthropic usa Claude Haiku; si no, Gemini (plan gratis de Google).
 // Se puede forzar con el secreto AI_PROVIDER = "anthropic" o "gemini".
-const GEMINI_MODEL = Deno.env.get('GEMINI_MODEL') || 'gemini-flash-latest';
 function provider() {
   const forced = (Deno.env.get('AI_PROVIDER') || '').toLowerCase();
   if (forced === 'anthropic' || forced === 'gemini') return forced;
   if (Deno.env.get('ANTHROPIC_API_KEY')) return 'anthropic';
   if (Deno.env.get('GEMINI_API_KEY')) return 'gemini';
   return null;
-}
-
-// Pide a la IA una respuesta JSON que cumpla el esquema.
-async function ia<T extends z.ZodType>(system: string, user: string, schema: T, effort: 'low' | 'medium', maxTokens: number): Promise<z.infer<T>> {
-  if (provider() === 'gemini') return gemini(system, user, schema);
-  const { Anthropic, zodOutputFormat } = await loadAnthropic();
-  const client = new Anthropic();
-  const res = await client.messages.parse({
-    model: MODEL,
-    max_tokens: maxTokens,
-    output_config: { effort, format: zodOutputFormat(schema) },
-    system,
-    messages: [{ role: 'user', content: user }]
-  });
-  if (res.stop_reason === 'refusal') throw new Error('La IA no pudo procesar ese texto.');
-  if (!res.parsed_output) throw new Error('La IA no devolvió un resultado válido. Probá de nuevo.');
-  return res.parsed_output as z.infer<T>;
-}
-
-async function gemini<T extends z.ZodType>(system: string, user: string, schema: T): Promise<z.infer<T>> {
-  const key = Deno.env.get('GEMINI_API_KEY');
-  const jsonSchema = z.toJSONSchema(schema);
-  // Primer intento: con esquema y sin "pensar" (más rápido). Si el modelo no acepta algo, reintenta simple.
-  const call = (withSchema: boolean) => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key! },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: withSchema ? system : `${system}\n\nRespondé SOLO con un JSON que cumpla este esquema:\n${JSON.stringify(jsonSchema)}` }] },
-      contents: [{ role: 'user', parts: [{ text: user }] }],
-      generationConfig: { temperature: 0.2, responseMimeType: 'application/json', ...(withSchema ? { responseJsonSchema: jsonSchema, thinkingConfig: { thinkingBudget: 0 } } : {}) }
-    }),
-    signal: AbortSignal.timeout(40000)
-  });
-  const t0 = Date.now();
-  let r = await call(true);
-  if (r.status === 400) { console.log('gemini 400 con esquema:', (await r.text()).slice(0, 300)); r = await call(false); }
-  console.log('gemini', GEMINI_MODEL, r.status, `${Date.now() - t0} ms`);
-  if (r.status === 429) throw Object.assign(new Error('rate'), { status: 429 });
-  if (r.status === 400 || r.status === 403) throw new Error('La clave de Gemini no es válida o el modelo no está disponible. Revisá GEMINI_API_KEY.');
-  if (!r.ok) throw new Error(`Gemini respondió ${r.status}: ${(await r.text()).slice(0, 200)}`);
-  const data = await r.json();
-  const text = (data.candidates?.[0]?.content?.parts || []).map((p: { text?: string }) => p.text || '').join('');
-  let obj: unknown;
-  try { obj = JSON.parse(text.replace(/^```(json)?|```$/g, '').trim()); } catch { throw new Error('La IA no devolvió un resultado válido. Probá de nuevo.'); }
-  const parsed = schema.safeParse(obj);
-  if (!parsed.success) { console.error('gemini schema', parsed.error, text); throw new Error('La IA devolvió datos incompletos. Probá de nuevo.'); }
-  return parsed.data;
 }
 
 const cors = {
@@ -85,34 +31,140 @@ const cors = {
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 
-const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
-  auth: { persistSession: false }
-});
+// ───────────────────────── Base de datos (REST directo) ─────────────────────────
 
-// ───────────────────────── IA: analizar comida ─────────────────────────
+// deno-lint-ignore no-explicit-any
+type Row = Record<string, any>;
+async function db(path: string, init: RequestInit = {}): Promise<Row[]> {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    ...init,
+    headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json', Prefer: 'return=representation', ...(init.headers || {}) }
+  });
+  if (!r.ok) throw new Error(`Base de datos ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  const t = await r.text();
+  return t ? JSON.parse(t) : [];
+}
+const enc = encodeURIComponent;
 
-const Item = z.object({
-  nombre: z.string().describe('Nombre corto del alimento o bebida, en castellano'),
-  cantidad: z.number().describe('Cantidad dicha (ej. 2 para "dos empanadas")'),
-  unidad: z.string().describe('unidad, porción, vaso, lata, g, ml, plato, rebanada, etc.'),
-  gramos: z.number().describe('Peso o volumen total estimado en g o ml'),
-  kcal: z.number(),
-  proteinas_g: z.number(),
-  carbos_g: z.number(),
-  grasas_g: z.number(),
-  fibra_g: z.number(),
-  alcohol_g: z.number().describe('Gramos de alcohol puro; 0 si no es bebida alcohólica')
-});
+async function getUser(token: string): Promise<Row | null> {
+  if (!token) return null;
+  const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${token}` } });
+  return r.ok ? await r.json() : null;
+}
 
-const Analisis = z.object({
-  items: z.array(Item),
-  tipo_comida: z.enum(['desayuno', 'almuerzo', 'merienda', 'cena', 'colacion', 'bebida', 'ninguna']),
-  momento: z.string().nullable().describe('Fecha y hora local "YYYY-MM-DDTHH:MM" si la persona dijo cuándo fue; null si es ahora'),
-  agua_ml: z.number().describe('Agua tomada que se mencionó, en ml; 0 si no se mencionó'),
-  peso_kg: z.number().nullable().describe('Peso corporal si lo dijo; null si no'),
-  cintura_cm: z.number().nullable().describe('Medida de cintura si la dijo; null si no'),
-  aclaracion: z.string().describe('Una frase corta con lo que supusiste (porciones, tamaños). Vacío si no hace falta')
-});
+// ───────────────────────── IA ─────────────────────────
+
+const num = { type: 'number' };
+const numOrNull = { anyOf: [{ type: 'number' }, { type: 'null' }] };
+const SCHEMA_ANALISIS = {
+  type: 'object',
+  properties: {
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          nombre: { type: 'string', description: 'Nombre corto del alimento o bebida, en castellano' },
+          cantidad: { type: 'number', description: 'Cantidad dicha (ej. 2 para "dos empanadas")' },
+          unidad: { type: 'string', description: 'unidad, porción, vaso, lata, g, ml, plato, rebanada, etc.' },
+          gramos: { type: 'number', description: 'Peso o volumen total estimado en g o ml' },
+          kcal: num, proteinas_g: num, carbos_g: num, grasas_g: num, fibra_g: num,
+          alcohol_g: { type: 'number', description: 'Gramos de alcohol puro; 0 si no es bebida alcohólica' }
+        },
+        required: ['nombre', 'cantidad', 'unidad', 'gramos', 'kcal', 'proteinas_g', 'carbos_g', 'grasas_g', 'fibra_g', 'alcohol_g'],
+        additionalProperties: false
+      }
+    },
+    tipo_comida: { type: 'string', enum: ['desayuno', 'almuerzo', 'merienda', 'cena', 'colacion', 'bebida', 'ninguna'] },
+    momento: { anyOf: [{ type: 'string' }, { type: 'null' }], description: 'Fecha y hora local "YYYY-MM-DDTHH:MM" si la persona dijo cuándo fue; null si es ahora' },
+    agua_ml: { type: 'number', description: 'Agua tomada que se mencionó, en ml; 0 si no se mencionó' },
+    peso_kg: { ...numOrNull, description: 'Peso corporal si lo dijo; null si no' },
+    cintura_cm: { ...numOrNull, description: 'Medida de cintura si la dijo; null si no' },
+    aclaracion: { type: 'string', description: 'Una frase corta con lo que supusiste (porciones, tamaños). Vacío si no hace falta' }
+  },
+  required: ['items', 'tipo_comida', 'momento', 'agua_ml', 'peso_kg', 'cintura_cm', 'aclaracion'],
+  additionalProperties: false
+} as const;
+
+const SCHEMA_CONSEJOS = {
+  type: 'object',
+  properties: {
+    resumen: { type: 'string', description: 'Dos o tres frases sobre cómo viene la persona' },
+    consejos: { type: 'array', items: { type: 'string' }, description: 'Entre 3 y 5 sugerencias concretas y accionables' }
+  },
+  required: ['resumen', 'consejos'],
+  additionalProperties: false
+} as const;
+
+// Normaliza la respuesta por si la IA se salteó algo.
+const n = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+function limpiarAnalisis(o: Row) {
+  return {
+    items: (Array.isArray(o.items) ? o.items : []).map((i: Row) => ({
+      nombre: String(i.nombre || 'Alimento'), cantidad: n(i.cantidad) || 1, unidad: String(i.unidad || 'porción'), gramos: n(i.gramos),
+      kcal: Math.round(n(i.kcal)), proteinas_g: n(i.proteinas_g), carbos_g: n(i.carbos_g), grasas_g: n(i.grasas_g), fibra_g: n(i.fibra_g), alcohol_g: n(i.alcohol_g)
+    })),
+    tipo_comida: String(o.tipo_comida || 'ninguna'),
+    momento: typeof o.momento === 'string' && o.momento ? o.momento : null,
+    agua_ml: n(o.agua_ml),
+    peso_kg: o.peso_kg == null ? null : n(o.peso_kg) || null,
+    cintura_cm: o.cintura_cm == null ? null : n(o.cintura_cm) || null,
+    aclaracion: String(o.aclaracion || '')
+  };
+}
+
+async function ia(system: string, user: string, schema: Row, effort: 'low' | 'medium', maxTokens: number): Promise<Row> {
+  if (provider() === 'gemini') return gemini(system, user, schema);
+  const [{ default: Anthropic }, { jsonSchemaOutputFormat }] = await Promise.all([
+    import('npm:@anthropic-ai/sdk@1.3.0'),
+    import('npm:@anthropic-ai/sdk@1.3.0/helpers/json-schema')
+  ]);
+  const client = new Anthropic();
+  const res = await client.messages.parse({
+    model: MODEL,
+    max_tokens: maxTokens,
+    // deno-lint-ignore no-explicit-any
+    output_config: { effort, format: jsonSchemaOutputFormat(schema as any) },
+    system,
+    messages: [{ role: 'user', content: user }]
+  });
+  if (res.stop_reason === 'refusal') throw new Error('La IA no pudo procesar ese texto.');
+  if (!res.parsed_output) throw new Error('La IA no devolvió un resultado válido. Probá de nuevo.');
+  return res.parsed_output as Row;
+}
+
+async function gemini(system: string, user: string, schema: Row): Promise<Row> {
+  const key = Deno.env.get('GEMINI_API_KEY')!;
+  // Primer intento: con esquema y sin "pensar" (más rápido). Si el modelo no acepta algo, reintenta simple.
+  const call = (full: boolean) => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: full ? system : `${system}\n\nRespondé SOLO con un JSON que cumpla este esquema:\n${JSON.stringify(schema)}` }] },
+      contents: [{ role: 'user', parts: [{ text: user }] }],
+      generationConfig: { temperature: 0.2, responseMimeType: 'application/json', ...(full ? { responseJsonSchema: schema, thinkingConfig: { thinkingBudget: 0 } } : {}) }
+    }),
+    signal: AbortSignal.timeout(40000)
+  });
+  const t0 = Date.now();
+  let r = await call(true);
+  if (r.status === 400) { console.log('gemini 400 con esquema:', (await r.text()).slice(0, 300)); r = await call(false); }
+  console.log('gemini', GEMINI_MODEL, r.status, `${Date.now() - t0} ms`);
+  if (r.status === 429) throw Object.assign(new Error('rate'), { status: 429 });
+  if (r.status === 400 || r.status === 403 || r.status === 404) {
+    console.log('gemini error:', (await r.text()).slice(0, 300));
+    throw new Error(`Gemini rechazó el pedido (${r.status}). Revisá GEMINI_API_KEY, o probá otro modelo con el secreto GEMINI_MODEL (ej. gemini-2.5-flash).`);
+  }
+  if (!r.ok) throw new Error(`Gemini respondió ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  const data = await r.json();
+  const text = (data.candidates?.[0]?.content?.parts || []).map((p: Row) => p.text || '').join('');
+  try {
+    return JSON.parse(text.replace(/^\s*```(json)?/, '').replace(/```\s*$/, '').trim());
+  } catch {
+    console.log('gemini texto no JSON:', text.slice(0, 300));
+    throw new Error('La IA no devolvió un resultado válido. Probá de nuevo.');
+  }
+}
 
 const SYSTEM_ANALIZAR = `Sos un nutricionista argentino que ayuda a registrar comidas para bajar de peso.
 Te pasan lo que una persona dijo por voz (puede tener errores de dictado) y tenés que devolver cada alimento o bebida con su porción y nutrientes estimados para ESA porción.
@@ -127,15 +179,9 @@ Reglas:
 - Redondeá kcal a enteros y macros a 1 decimal. Sé realista, ni optimista ni exagerado.`;
 
 async function analizar(texto: string, ahora: string) {
-  return ia(SYSTEM_ANALIZAR, `Fecha y hora local ahora: ${ahora}\nLo que dijo: "${texto}"`, Analisis, 'low', 4000);
+  const o = await ia(SYSTEM_ANALIZAR, `Fecha y hora local ahora: ${ahora}\nLo que dijo: "${texto}"`, SCHEMA_ANALISIS, 'low', 4000);
+  return limpiarAnalisis(o);
 }
-
-// ───────────────────────── IA: consejos ─────────────────────────
-
-const Consejos = z.object({
-  resumen: z.string().describe('Dos o tres frases sobre cómo viene la persona'),
-  consejos: z.array(z.string()).describe('Entre 3 y 5 sugerencias concretas y accionables')
-});
 
 const SYSTEM_CONSEJOS = `Sos un nutricionista argentino, cercano y directo, que acompaña a alguien que quiere bajar de peso.
 Te pasan un resumen de sus últimos días (calorías, macros, agua, alcohol, peso y cintura, comidas frecuentes).
@@ -143,14 +189,17 @@ Hablá de vos, en castellano rioplatense, sin sermones. Basate solo en los datos
 No des indicaciones médicas; si algo parece riesgoso (muy pocas calorías, mucho alcohol), sugerí consultarlo con un profesional.`;
 
 async function consejos(datos: unknown) {
-  return ia(SYSTEM_CONSEJOS, JSON.stringify(datos), Consejos, 'medium', 3000);
+  const o = await ia(SYSTEM_CONSEJOS, JSON.stringify(datos), SCHEMA_CONSEJOS, 'medium', 3000);
+  return { resumen: String(o.resumen || ''), consejos: Array.isArray(o.consejos) ? o.consejos.map(String) : [] };
 }
 
 // ───────────────────────── Notificaciones ─────────────────────────
 
+const loadWebpush = async () => (await import('npm:web-push@3.6.7')).default;
+
 async function getConfig(key: string) {
-  const { data } = await admin.from('peso_server_config').select('value').eq('key', key).maybeSingle();
-  return data?.value as string | undefined;
+  const rows = await db(`peso_server_config?key=eq.${enc(key)}&select=value`);
+  return rows[0]?.value as string | undefined;
 }
 
 async function vapid() {
@@ -161,13 +210,10 @@ async function vapid() {
     const keys = webpush.generateVAPIDKeys();
     pub = keys.publicKey;
     priv = keys.privateKey;
-    await admin.from('peso_server_config').upsert([
-      { key: 'vapid_public', value: pub },
-      { key: 'vapid_private', value: priv }
-    ]);
+    await db('peso_server_config', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify([{ key: 'vapid_public', value: pub }, { key: 'vapid_private', value: priv }]) });
   }
   webpush.setVapidDetails('mailto:avisos@control-peso.app', pub, priv);
-  return pub;
+  return { webpush, pub };
 }
 
 // Hora local "HH:MM" y fecha "YYYY-MM-DD" en la zona de la persona.
@@ -179,12 +225,11 @@ function localParts(tz: string, d = new Date()) {
 const toMin = (hm: string) => { const [h, m] = hm.slice(0, 5).split(':').map(Number); return h * 60 + m; };
 
 async function cron() {
-  await vapid();
-  const webpush = await loadWebpush();
-  const { data: subs } = await admin.from('peso_push_subs').select('*');
+  const { webpush } = await vapid();
+  const subs = await db('peso_push_subs?select=*');
   if (!subs?.length) return { enviados: 0 };
   const userIds = [...new Set(subs.map((s) => s.user_id))];
-  const { data: profiles } = await admin.from('peso_profiles').select('*').in('user_id', userIds).eq('water_reminders', true);
+  const profiles = await db(`peso_profiles?select=*&water_reminders=eq.true&user_id=in.(${userIds.join(',')})`);
   let enviados = 0;
   for (const p of profiles || []) {
     const tz = p.timezone || 'America/Argentina/Buenos_Aires';
@@ -193,8 +238,7 @@ async function cron() {
     if (now < start || now > end) continue;
 
     // Agua tomada hoy (desde la medianoche local; tomamos 30 h hacia atrás y filtramos por fecha local).
-    const { data: agua } = await admin.from('peso_metrics').select('value, measured_at')
-      .eq('user_id', p.user_id).eq('kind', 'agua').gte('measured_at', new Date(Date.now() - 30 * 3600e3).toISOString());
+    const agua = await db(`peso_metrics?select=value,measured_at&kind=eq.agua&user_id=eq.${p.user_id}&measured_at=gte.${enc(new Date(Date.now() - 30 * 3600e3).toISOString())}`);
     const hoy = (agua || []).filter((a) => localParts(tz, new Date(a.measured_at)).date === date).reduce((s, a) => s + Number(a.value), 0);
     const meta = p.water_goal || 2500;
     if (hoy >= meta) continue;
@@ -212,11 +256,11 @@ async function cron() {
       });
       try {
         await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload, { TTL: 1800 });
-        await admin.from('peso_push_subs').update({ last_sent_at: new Date().toISOString() }).eq('id', s.id);
+        await db(`peso_push_subs?id=eq.${s.id}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ last_sent_at: new Date().toISOString() }) });
         enviados++;
       } catch (err) {
         const code = (err as { statusCode?: number }).statusCode;
-        if (code === 404 || code === 410) await admin.from('peso_push_subs').delete().eq('id', s.id); // el celular dio de baja
+        if (code === 404 || code === 410) await db(`peso_push_subs?id=eq.${s.id}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } }); // el celular dio de baja
         else console.error('push', code, err);
       }
     }
@@ -237,14 +281,14 @@ Deno.serve(async (req) => {
       if (!secret || body.secret !== secret) return json({ error: 'no autorizado' }, 401);
       return json(await cron());
     }
-    if (action === 'push-key') return json({ publicKey: await vapid() });
+    if (action === 'push-key') return json({ publicKey: (await vapid()).pub });
 
     // El resto necesita una sesión iniciada.
     const token = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
-    const { data: u } = await admin.auth.getUser(token);
-    if (!u?.user) return json({ error: 'Iniciá sesión de nuevo.' }, 401);
+    const user = await getUser(token);
+    if (!user?.id) return json({ error: 'Iniciá sesión de nuevo.' }, 401);
     const allowed = (Deno.env.get('ALLOWED_EMAILS') || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
-    if (allowed.length && !allowed.includes((u.user.email || '').toLowerCase())) return json({ error: 'Usuario no habilitado.' }, 403);
+    if (allowed.length && !allowed.includes((user.email || '').toLowerCase())) return json({ error: 'Usuario no habilitado.' }, 403);
 
     if (!provider() && (action === 'analizar' || action === 'consejos')) {
       return json({ error: 'Falta cargar la clave de la IA en los secretos de Supabase: GEMINI_API_KEY (gratis) o ANTHROPIC_API_KEY.' }, 500);
