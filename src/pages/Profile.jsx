@@ -64,7 +64,7 @@ export default function Profile({ first = false }) {
 
   return (
     <form className="page formpage" onSubmit={submit}>
-      <PageHead title={first ? 'Arranquemos' : 'Mis datos y metas'} sub={first ? 'Control de Peso' : 'Ajustes'} />
+      <PageHead title={first ? 'Arranquemos' : 'Mis datos y metas'} sub={first ? 'Registro Corporal' : 'Ajustes'} />
       {first && <p className="muted">Con estos datos calculo cuántas calorías te conviene comer por día para bajar de forma sostenida (alrededor de medio kilo por semana). Después lo podés cambiar.</p>}
 
       <section className="card stack12">

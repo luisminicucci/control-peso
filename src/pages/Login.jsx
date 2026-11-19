@@ -30,7 +30,7 @@ export default function Login() {
   return (
     <div className="center-screen">
       <form className="card narrow stack16" onSubmit={submit}>
-        <div className="brand dark"><span className="brandmark"><Icon name="scale" size={18} /></span><span>Control de Peso</span></div>
+        <div className="brand dark"><span className="brandmark"><Icon name="scale" size={18} /></span><span>Registro Corporal</span></div>
         <p className="muted small">Si ya tenés usuario en Gastos en Familia, entrá con el mismo.</p>
         <h1>{modo === 'entrar' ? 'Entrar' : 'Crear cuenta'}</h1>
         <label className="field">Email

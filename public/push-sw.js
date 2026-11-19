@@ -2,7 +2,7 @@
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch { data = { body: event.data && event.data.text() }; }
-  event.waitUntil(self.registration.showNotification(data.title || 'Control de Peso', {
+  event.waitUntil(self.registration.showNotification(data.title || 'Registro Corporal', {
     body: data.body || '',
     icon: 'icon-192.png',
     badge: 'icon-192.png',

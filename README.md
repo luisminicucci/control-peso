@@ -1,4 +1,4 @@
-# Control de Peso
+# Registro Corporal
 
 App web para bajar de peso. Funciona en la compu y se instala en el celular como una app (PWA).
 

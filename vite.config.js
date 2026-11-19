@@ -10,9 +10,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icon.svg', 'apple-touch-icon.png', 'push-sw.js'],
       manifest: {
-        name: 'Control de Peso',
-        short_name: 'Peso',
-        description: 'Comida por voz, peso, agua y progreso',
+        name: 'Registro Corporal',
+        short_name: 'Registro',
+        description: 'Comida por voz, peso, ayuno, agua y progreso',
         lang: 'es-AR',
         start_url: './',
         scope: './',
