@@ -135,35 +135,47 @@ async function ia(system: string, user: string, schema: Row, effort: 'low' | 'me
 
 async function gemini(system: string, user: string, schema: Row): Promise<Row> {
   const key = Deno.env.get('GEMINI_API_KEY')!;
-  // Primer intento: con esquema y sin "pensar" (más rápido). Si el modelo no acepta algo, reintenta simple.
-  const call = (full: boolean) => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: full ? system : `${system}\n\nRespondé SOLO con un JSON que cumpla este esquema:\n${JSON.stringify(schema)}` }] },
-      contents: [{ role: 'user', parts: [{ text: user }] }],
-      generationConfig: { temperature: 0.2, responseMimeType: 'application/json', ...(full ? { responseJsonSchema: schema, thinkingConfig: { thinkingBudget: 0 } } : {}) }
-    }),
-    signal: AbortSignal.timeout(40000)
-  });
-  const t0 = Date.now();
-  let r = await call(true);
-  if (r.status === 400) { console.log('gemini 400 con esquema:', (await r.text()).slice(0, 300)); r = await call(false); }
-  console.log('gemini', GEMINI_MODEL, r.status, `${Date.now() - t0} ms`);
-  if (r.status === 429) throw Object.assign(new Error('rate'), { status: 429 });
-  if (r.status === 400 || r.status === 403 || r.status === 404) {
-    console.log('gemini error:', (await r.text()).slice(0, 300));
-    throw new Error(`Gemini rechazó el pedido (${r.status}). Revisá GEMINI_API_KEY, o probá otro modelo con el secreto GEMINI_MODEL (ej. gemini-2.5-flash).`);
+  // Intentos en orden: con esquema y sin "pensar" (más rápido); simple; y por último un modelo más liviano.
+  const intentos = [
+    { model: GEMINI_MODEL, full: true, ms: 18000 },
+    { model: GEMINI_MODEL, full: false, ms: 15000 },
+    { model: 'gemini-flash-lite-latest', full: false, ms: 15000 }
+  ];
+  let ultimo = '';
+  for (const it of intentos) {
+    const t0 = Date.now();
+    let r: Response;
+    try {
+      r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${it.model}:generateContent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: it.full ? system : `${system}\n\nRespondé SOLO con un JSON que cumpla este esquema:\n${JSON.stringify(schema)}` }] },
+          contents: [{ role: 'user', parts: [{ text: user }] }],
+          generationConfig: { temperature: 0.2, responseMimeType: 'application/json', ...(it.full ? { responseJsonSchema: schema, thinkingConfig: { thinkingBudget: 0 } } : {}) }
+        }),
+        signal: AbortSignal.timeout(it.ms)
+      });
+    } catch (err) {
+      ultimo = `${it.model}: sin respuesta en ${it.ms / 1000} s`;
+      console.log('gemini', it.model, it.full ? 'con esquema' : 'simple', 'error:', (err as Error).name, `${Date.now() - t0} ms`);
+      continue;
+    }
+    const body = await r.text();
+    console.log('gemini', it.model, it.full ? 'con esquema' : 'simple', r.status, `${Date.now() - t0} ms`, r.ok ? '' : body.slice(0, 300));
+    if (r.status === 429) throw Object.assign(new Error('rate'), { status: 429 });
+    if (r.status === 401 || r.status === 403) throw new Error('Google rechazó la clave de Gemini. Revisá el secreto GEMINI_API_KEY en Supabase.');
+    if (!r.ok) { ultimo = `${it.model}: error ${r.status}`; continue; }
+    const data = JSON.parse(body);
+    const text = (data.candidates?.[0]?.content?.parts || []).map((p: Row) => p.text || '').join('');
+    try {
+      return JSON.parse(text.replace(/^\s*```(json)?/, '').replace(/```\s*$/, '').trim());
+    } catch {
+      ultimo = `${it.model}: respuesta no válida`;
+      console.log('gemini texto no JSON:', text.slice(0, 300));
+    }
   }
-  if (!r.ok) throw new Error(`Gemini respondió ${r.status}: ${(await r.text()).slice(0, 200)}`);
-  const data = await r.json();
-  const text = (data.candidates?.[0]?.content?.parts || []).map((p: Row) => p.text || '').join('');
-  try {
-    return JSON.parse(text.replace(/^\s*```(json)?/, '').replace(/```\s*$/, '').trim());
-  } catch {
-    console.log('gemini texto no JSON:', text.slice(0, 300));
-    throw new Error('La IA no devolvió un resultado válido. Probá de nuevo.');
-  }
+  throw new Error(`Gemini no respondió bien (${ultimo}). Probá de nuevo en un rato.`);
 }
 
 const SYSTEM_ANALIZAR = `Sos un nutricionista argentino que ayuda a registrar comidas para bajar de peso.
