@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useStore } from '../store.jsx';
 import { addDays, dayKey, dayLabel, fmt, fmtL, mealLabel, sumItems, timeLabel, tragos, ZERO, lastNDays } from '../lib.js';
 import { Bar, Icon, Ring } from '../ui.jsx';
-import { FastCard } from './Fast.jsx';
+import { FastCard, useFasts } from './Fast.jsx';
 
 export const BEBIDAS = [
   { label: 'Cerveza (lata 473)', item: { name: 'Cerveza', quantity: 1, unit: 'lata 473 ml', grams: 473, kcal: 200, protein_g: 1.6, carbs_g: 17, fat_g: 0, fiber_g: 0, alcohol_g: 18.7 } },
@@ -19,6 +19,7 @@ export default function Today() {
   const day = params.get('dia') || today;
   const isToday = day === today;
   const [busy, setBusy] = useState(false);
+  const fastActive = useFasts().some((f) => !f.end);
 
   const t = totals[day] || { ...ZERO, agua: 0 };
   const goal = profile.kcal_goal || 2000;
@@ -70,6 +71,7 @@ export default function Today() {
 
       <div className="homegrid">
         <div className="stack16">
+          {isToday && fastActive && <FastCard />}
           <section className="hero">
             <div className="row gap16 wrap center-mobile">
               <Ring value={t.kcal} goal={goal}>
@@ -102,7 +104,7 @@ export default function Today() {
         </div>
 
         <div className="stack16">
-          {isToday && <FastCard />}
+          {isToday && !fastActive && <FastCard />}
           <section className="card stack12">
             <div className="row between baseline">
               <span className="cardtitle row gap6"><Icon name="drop" size={18} className="water-ic" />Agua</span>
