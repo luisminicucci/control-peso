@@ -113,14 +113,17 @@ export function sumItems(items) {
 // Totales por día: { 'YYYY-MM-DD': { kcal, protein_g, ..., agua, comidas } }
 export function dailyTotals(meals, metrics) {
   const by = {};
-  const get = (k) => (by[k] ||= { ...ZERO, agua: 0, comidas: 0 });
+  const get = (k) => (by[k] ||= { ...ZERO, agua: 0, comidas: 0, actividad: 0, act_min: 0 });
   for (const m of meals) {
     const d = get(dayKey(m.eaten_at));
     const t = sumItems(m.items);
     for (const k in ZERO) d[k] += t[k];
     d.comidas++;
   }
-  for (const x of metrics) if (x.kind === 'agua') get(dayKey(x.measured_at)).agua += Number(x.value);
+  for (const x of metrics) {
+    if (x.kind === 'agua') get(dayKey(x.measured_at)).agua += Number(x.value);
+    if (x.kind === 'actividad') { const d = get(dayKey(x.measured_at)); d.actividad += Number(x.value); d.act_min += Number(x.meta?.minutos) || 0; }
+  }
   return by;
 }
 

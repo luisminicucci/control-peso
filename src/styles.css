@@ -23,6 +23,7 @@
   --c-fat: #D0643C;
   --chart-dots: #9FB5AE;
   --fast: #D98A2B;
+  --act: #2E9E6B;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 * { box-sizing: border-box; }
@@ -267,3 +268,12 @@ code { background: var(--line-soft); padding: 2px 6px; border-radius: 6px; }
 .fasemark i { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); font-style: normal; font-size: 10.5px; color: var(--muted); white-space: nowrap; }
 .fasebox { background: #FDF3E6; border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; line-height: 1.4; }
 .brandimg { width: 34px; height: 34px; border-radius: 9px; }
+.act-ic { color: var(--act); }
+.actrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.actrow input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--accent); }
+.actrow .inline-input { min-height: 40px; }
+.actrow .grow { flex: 1 1 140px; }
+.mini-l { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--muted); }
+.mini-l .mini { width: 74px; }
+.act-l { color: #7FE0B0; }
+.actline { padding: 4px 0; border-bottom: 1px solid var(--line-soft); }

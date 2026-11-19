@@ -26,6 +26,7 @@ export default function Today() {
   const left = goal - t.kcal;
   const dayMeals = meals.filter((m) => dayKey(m.eaten_at) === day).sort((a, b) => new Date(a.eaten_at) - new Date(b.eaten_at));
   const water = metrics.filter((m) => m.kind === 'agua' && dayKey(m.measured_at) === day);
+  const acts = metrics.filter((m) => m.kind === 'actividad' && dayKey(m.measured_at) === day).sort((a, b) => new Date(a.measured_at) - new Date(b.measured_at));
   const weightToday = metrics.find((m) => m.kind === 'peso' && dayKey(m.measured_at) === day);
 
   // Alcohol: semana de lunes a domingo que contiene el día.
@@ -66,7 +67,7 @@ export default function Today() {
           </div>
           <button type="button" className="iconbtn" aria-label="Día siguiente" disabled={isToday} onClick={() => goDay(addDays(day, 1))}><Icon name="left" size={20} style={{ transform: 'scaleX(-1)' }} /></button>
         </div>
-        <button type="button" className="btn primary desktop-only" onClick={() => nav('/registrar?voz=1' + (isToday ? '' : '&dia=' + day))}><Icon name="mic" size={20} />Registrar comida</button>
+        <button type="button" className="btn primary desktop-only" onClick={() => nav('/registrar?voz=1' + (isToday ? '' : '&dia=' + day))}><Icon name="mic" size={20} />Registrar</button>
       </div>
 
       <div className="homegrid">
@@ -80,6 +81,7 @@ export default function Today() {
               </Ring>
               <div className="col gap10 grow">
                 <span className="hero-big">{left >= 0 ? <>Te quedan <b>{fmt(left)}</b> kcal</> : <>Te pasaste <b className="warn-l">{fmt(-left)}</b> kcal</>}</span>
+                {t.actividad > 0 && <span className="hero-sub">Quemaste <b className="act-l">{fmt(t.actividad)} kcal</b> en actividad · neto {fmt(t.kcal - t.actividad)} kcal</span>}
                 <Macro label="Proteínas" v={t.protein_g} goal={profile.protein_goal || 100} />
                 <Macro label="Carbohidratos" v={t.carbs_g} goal={Math.round(goal * 0.45 / 4)} />
                 <Macro label="Grasas" v={t.fat_g} goal={Math.round(goal * 0.3 / 9)} />
@@ -129,6 +131,22 @@ export default function Today() {
               {BEBIDAS.map((b) => <button key={b.label} type="button" className="btn small" disabled={busy} onClick={() => bebida(b)}>+ {b.label}</button>)}
             </div>
             <span className="muted small">Lo que digas por voz ("me tomé dos cervezas") también suma acá.</span>
+          </section>
+
+          <section className="card stack8">
+            <div className="row between baseline">
+              <span className="cardtitle row gap6"><Icon name="run" size={18} className="act-ic" />Actividad física</span>
+              {t.actividad > 0 && <span className="strong">{fmt(t.actividad)} kcal <span className="muted small">· {fmt(t.act_min)} min</span></span>}
+            </div>
+            {acts.map((a) => (
+              <div key={a.id} className="row between gap8 actline">
+                <span className="col grow"><span>{a.meta?.nombre || 'Actividad'}</span><span className="muted small">{a.meta?.minutos ? fmt(a.meta.minutos) + ' min · ' : ''}{timeLabel(a.measured_at)}</span></span>
+                <span className="strong">{fmt(a.value)} kcal</span>
+                <button type="button" className="iconbtn" aria-label="Borrar" onClick={() => window.confirm('¿Borrar esta actividad?') && deleteMetric(a.id).catch((e) => setError(e.message))}><Icon name="trash" size={16} /></button>
+              </div>
+            ))}
+            {!acts.length && <span className="muted small">Decí por ejemplo "caminé 40 minutos rápido" o "hice una hora de pesas" y te calculo las calorías.</span>}
+            <Link to={'/registrar?voz=1' + (isToday ? '' : '&dia=' + day)} className="btn small">+ Registrar actividad</Link>
           </section>
 
           <section className="card row between">

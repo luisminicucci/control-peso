@@ -46,7 +46,7 @@ export default function App() {
     <div className="shell">
       <aside className="sidebar">
         <div className="brand"><img className="brandimg" src="./icon.svg" alt="" /><span>Registro Corporal</span></div>
-        <button type="button" className="btn primary sideadd" onClick={() => nav('/registrar?voz=1')}><Icon name="mic" size={20} />Registrar comida</button>
+        <button type="button" className="btn primary sideadd" onClick={() => nav('/registrar?voz=1')}><Icon name="mic" size={20} />Registrar</button>
         <nav className="sidenav">
           {NAV.map((n) => (
             <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => 'sidelink' + (isActive ? ' active' : '')}>
@@ -74,7 +74,7 @@ export default function App() {
 
       {!isForm && (
         <>
-          <button type="button" className="fab" aria-label="Registrar comida por voz" onClick={() => nav('/registrar?voz=1')}>
+          <button type="button" className="fab" aria-label="Registrar por voz" onClick={() => nav('/registrar?voz=1')}>
             <Icon name="mic" size={28} />
           </button>
           <nav className="bottomnav">

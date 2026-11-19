@@ -21,6 +21,7 @@ const paths = {
   edit: <><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></>,
   left: <path d="m15 18-6-6 6-6" />,
   check: <path d="M20 6 9 17l-5-5" />,
+  run: <><circle cx="14" cy="4" r="2" /><path d="m6 20 3-5 3 2 1-5 3 3h3" /><path d="m8 9 4-2 3 2" /></>,
   clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>
 };
 

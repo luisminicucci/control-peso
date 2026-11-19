@@ -80,9 +80,24 @@ const SCHEMA_ANALISIS = {
     agua_ml: { type: 'number', description: 'Agua tomada que se mencionó, en ml; 0 si no se mencionó' },
     peso_kg: { ...numOrNull, description: 'Peso corporal si lo dijo; null si no' },
     cintura_cm: { ...numOrNull, description: 'Medida de cintura si la dijo; null si no' },
-    aclaracion: { type: 'string', description: 'Una frase corta con lo que supusiste (porciones, tamaños). Vacío si no hace falta' }
+    actividades: {
+      type: 'array',
+      description: 'Actividad física que la persona dijo que hizo; vacío si no mencionó ninguna',
+      items: {
+        type: 'object',
+        properties: {
+          nombre: { type: 'string', description: 'Actividad en castellano, corta (ej. "Caminata rápida", "Bicicleta", "Pesas")' },
+          minutos: { type: 'number' },
+          intensidad: { type: 'string', enum: ['baja', 'media', 'alta'] },
+          kcal: { type: 'number', description: 'Calorías gastadas por la actividad (MET × peso en kg × horas)' }
+        },
+        required: ['nombre', 'minutos', 'intensidad', 'kcal'],
+        additionalProperties: false
+      }
+    },
+    aclaracion: { type: 'string', description: 'Una frase corta con lo que supusiste (porciones, tamaños, intensidad). Vacío si no hace falta' }
   },
-  required: ['items', 'tipo_comida', 'momento', 'agua_ml', 'peso_kg', 'cintura_cm', 'aclaracion'],
+  required: ['items', 'tipo_comida', 'momento', 'agua_ml', 'peso_kg', 'cintura_cm', 'actividades', 'aclaracion'],
   additionalProperties: false
 } as const;
 
@@ -109,6 +124,9 @@ function limpiarAnalisis(o: Row) {
     agua_ml: n(o.agua_ml),
     peso_kg: o.peso_kg == null ? null : n(o.peso_kg) || null,
     cintura_cm: o.cintura_cm == null ? null : n(o.cintura_cm) || null,
+    actividades: (Array.isArray(o.actividades) ? o.actividades : []).map((a: Row) => ({
+      nombre: String(a.nombre || 'Actividad'), minutos: n(a.minutos), intensidad: String(a.intensidad || 'media'), kcal: Math.round(n(a.kcal))
+    })),
     aclaracion: String(o.aclaracion || '')
   };
 }
@@ -178,8 +196,8 @@ async function gemini(system: string, user: string, schema: Row): Promise<Row> {
   throw new Error(`Gemini no respondió bien (${ultimo}). Probá de nuevo en un rato.`);
 }
 
-const SYSTEM_ANALIZAR = `Sos un nutricionista argentino que ayuda a registrar comidas para bajar de peso.
-Te pasan lo que una persona dijo por voz (puede tener errores de dictado) y tenés que devolver cada alimento o bebida con su porción y nutrientes estimados para ESA porción.
+const SYSTEM_ANALIZAR = `Sos un nutricionista argentino que ayuda a registrar comidas y actividad física para bajar de peso.
+Te pasan lo que una persona dijo por voz (puede tener errores de dictado) y tenés que devolver cada alimento o bebida con su porción y nutrientes estimados para ESA porción, y la actividad física que haya hecho.
 
 Reglas:
 - Usá porciones y productos típicos de Argentina: empanada ≈ 90-110 g; milanesa ≈ 150 g; porción de pizza de muzzarella ≈ 1/8 de grande; factura ≈ 50 g; alfajor ≈ 50 g; "coca chica" = botella 500 ml (si dice "lata", 354 ml); vaso ≈ 250 ml; taza ≈ 250 ml; mate cocido/café solo sin azúcar ≈ 0-5 kcal; cucharada de azúcar ≈ 12 g.
@@ -187,11 +205,12 @@ Reglas:
 - Cerveza ≈ 5% de alcohol, vino ≈ 12-13%, fernet ≈ 39% (un fernet con coca típico lleva ~60 ml de fernet). Calculá alcohol_g = ml × %alc × 0,789. Las calorías del alcohol van incluidas en kcal.
 - Agua sola NO va en items: sumala en agua_ml. Mate amargo, té o café sin azúcar sí podés ponerlos como items con sus pocas kcal, y no los cuentes como agua.
 - Si la persona menciona su peso o cintura, completá peso_kg o cintura_cm.
+- Si cuenta actividad física (caminar, correr, bici, gimnasio, pesas, fútbol, pádel, natación, baile, limpiar la casa, subir escaleras, pasos), ponela en actividades con minutos, intensidad y kcal = MET × peso (kg) × horas, usando el peso que te paso. MET de referencia: caminar tranquilo 3, caminata rápida 4,3, trotar 7, correr 9-11, bici paseo 4, bici intensa 8, pesas 3,5-6, fútbol 7, pádel 6, natación 6-8, baile 5, tareas de la casa 3. Si dice pasos, 1.000 pasos ≈ 10 min de caminata. Si no dice la duración, suponé una razonable y aclaralo. La actividad NO va en items.
 - tipo_comida: deducilo de lo que dijo o de la hora local; "bebida" si solo tomó algo; "ninguna" si no hay comida ni bebida.
 - Redondeá kcal a enteros y macros a 1 decimal. Sé realista, ni optimista ni exagerado.`;
 
-async function analizar(texto: string, ahora: string) {
-  const o = await ia(SYSTEM_ANALIZAR, `Fecha y hora local ahora: ${ahora}\nLo que dijo: "${texto}"`, SCHEMA_ANALISIS, 'low', 4000);
+async function analizar(texto: string, ahora: string, peso: number | null) {
+  const o = await ia(SYSTEM_ANALIZAR, `Fecha y hora local ahora: ${ahora}\nPeso de la persona: ${peso ? peso + ' kg' : 'desconocido (suponé 80 kg)'}\nLo que dijo: "${texto}"`, SCHEMA_ANALISIS, 'low', 4000);
   return limpiarAnalisis(o);
 }
 
@@ -308,7 +327,7 @@ Deno.serve(async (req) => {
     if (action === 'analizar') {
       const texto = String(body.texto || '').trim().slice(0, 2000);
       if (!texto) return json({ error: 'No llegó ningún texto.' }, 400);
-      return json(await analizar(texto, String(body.ahora || new Date().toISOString())));
+      return json(await analizar(texto, String(body.ahora || new Date().toISOString()), Number(body.peso) || null));
     }
     if (action === 'consejos') return json(await consejos(body.datos));
     return json({ error: 'Acción desconocida' }, 400);

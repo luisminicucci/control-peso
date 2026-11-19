@@ -23,7 +23,7 @@ export default function MealForm() {
   const { id } = useParams();
   const [params] = useSearchParams();
   const nav = useNavigate();
-  const { meals, saveMeal, deleteMeal, addMetric } = useStore();
+  const { meals, saveMeal, deleteMeal, addMetric, lastWeight } = useStore();
   const existing = id ? meals.find((m) => m.id === id) : null;
 
   const dia = params.get('dia');
@@ -36,6 +36,7 @@ export default function MealForm() {
   const [when, setWhen] = useState(toLocalInput(initialDate));
   const [source, setSource] = useState(existing?.source || 'texto');
   const [extras, setExtras] = useState({});
+  const [acts, setActs] = useState([]);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState('');
@@ -54,7 +55,7 @@ export default function MealForm() {
     if (!nuevo) return;
     setBusy('ia'); setMsg('');
     try {
-      const r = await api('analizar', { texto: nuevo, ahora: nowLocalString() });
+      const r = await api('analizar', { texto: nuevo, ahora: nowLocalString(), peso: lastWeight });
       setText((prev) => (prev ? prev + '. ' + nuevo : nuevo));
       setItems((prev) => [...prev, ...r.items.map(fromIA)]);
       if (!existing && items.length === 0 && r.tipo_comida && r.tipo_comida !== 'ninguna') setMealType(r.tipo_comida);
@@ -64,8 +65,10 @@ export default function MealForm() {
       if (r.peso_kg) ex.peso = { v: r.peso_kg, on: true };
       if (r.cintura_cm) ex.cintura = { v: r.cintura_cm, on: true };
       setExtras((prev) => ({ ...prev, ...ex }));
+      const nuevasActs = (r.actividades || []).map((a) => ({ ...a, on: true }));
+      setActs((prev) => [...prev, ...nuevasActs]);
       setNote(r.aclaracion || '');
-      if (!r.items.length && !Object.keys(ex).length) setMsg('No encontré comidas en lo que dijiste. Probá de nuevo o escribilo.');
+      if (!r.items.length && !Object.keys(ex).length && !nuevasActs.length) setMsg('No encontré comidas ni actividad en lo que dijiste. Probá de nuevo o escribilo.');
       if (t === undefined) setDraft('');
     } catch (e) {
       setText((prev) => prev || nuevo);
@@ -108,6 +111,7 @@ export default function MealForm() {
         await deleteMeal(existing.id);
       }
       const units = { agua: 'ml', peso: 'kg', cintura: 'cm' };
+      for (const a of acts) if (a.on && num(a.kcal) > 0) await addMetric('actividad', Math.round(num(a.kcal)), { unit: 'kcal', measured_at: at, source: source === 'voz' ? 'voz' : 'manual', meta: { nombre: a.nombre, minutos: num(a.minutos), intensidad: a.intensidad } });
       for (const [k, x] of Object.entries(extras)) if (x.on && num(x.v)) await addMetric(k, num(x.v), { unit: units[k], measured_at: at, source: source === 'voz' ? 'voz' : 'manual' });
       nav(dayKey(at) === dayKey() ? '/' : '/?dia=' + dayKey(at));
     } catch (e) {
@@ -124,13 +128,13 @@ export default function MealForm() {
 
   if (id && !existing) return <div className="page"><p className="muted">No encontré esa comida.</p></div>;
 
-  const hasExtras = Object.keys(extras).length > 0;
+  const hasExtras = Object.keys(extras).length > 0 || acts.length > 0;
 
   return (
     <div className="page formpage">
       <div className="formhead">
         <button type="button" className="iconbtn" aria-label="Volver" onClick={() => nav(-1)}><Icon name="close" /></button>
-        <span className="formtitle">{existing ? 'Editar comida' : 'Registrar comida'}</span>
+        <span className="formtitle">{existing ? 'Editar comida' : 'Registrar'}</span>
         {existing ? <button type="button" className="iconbtn danger-ic" aria-label="Borrar" onClick={borrar}><Icon name="trash" size={20} /></button> : <span style={{ width: 44 }} />}
       </div>
 
@@ -143,14 +147,14 @@ export default function MealForm() {
           {speech.listening ? (speech.interim || <span className="muted">Te escucho… decí qué comiste y tocá el botón para terminar.</span>)
             : busy === 'ia' ? <span className="muted">Calculando calorías y nutrientes…</span>
             : items.length ? <span className="muted">¿Algo más? Tocá el micrófono para sumar.</span>
-            : speechSupported ? <span className="muted">Tocá el micrófono y contá qué comiste, o escribilo abajo.</span>
+            : speechSupported ? <span className="muted">Tocá el micrófono y contá qué comiste o qué actividad hiciste, o escribilo abajo.</span>
             : <span className="muted">Este navegador no tiene dictado: escribilo abajo (en el celu podés usar el micrófono del teclado).</span>}
         </div>
       </section>
       {speech.err && <p className="note">{speech.err}</p>}
 
       <div className="row gap8">
-        <input className="inline-input grow" placeholder='Ej: "dos empanadas de carne y una coca chica"' value={draft}
+        <input className="inline-input grow" placeholder='Ej: "dos empanadas y una coca" o "caminé 40 minutos"' value={draft}
           onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { setSource('texto'); analizar(); } }} />
         <button type="button" className="btn" disabled={busy === 'ia' || !draft.trim()} onClick={() => { setSource('texto'); analizar(); }}>
           <Icon name="sparkle" size={18} />Analizar
@@ -193,7 +197,24 @@ export default function MealForm() {
         </>
       )}
 
-      {hasExtras && (
+      {acts.length > 0 && (
+        <section className="card stack8">
+          <span className="cardtitle row gap6"><Icon name="run" size={18} className="act-ic" />Actividad física</span>
+          {acts.map((a, i) => (
+            <div key={i} className="actrow">
+              <input type="checkbox" checked={a.on} onChange={(e) => setActs(acts.map((x, j) => (j === i ? { ...x, on: e.target.checked } : x)))} aria-label="Anotar" />
+              <input className="inline-input grow" value={a.nombre} onChange={(e) => setActs(acts.map((x, j) => (j === i ? { ...x, nombre: e.target.value } : x)))} />
+              <label className="mini-l"><input className="inline-input mini" inputMode="numeric" value={a.minutos} onChange={(e) => {
+                const m = num(e.target.value); setActs(acts.map((x, j) => (j === i ? { ...x, minutos: e.target.value, kcal: m && num(x.minutos) ? Math.round((num(x.kcal) * m) / num(x.minutos)) : x.kcal } : x)));
+              }} />min</label>
+              <label className="mini-l"><input className="inline-input mini strong" inputMode="numeric" value={a.kcal} onChange={(e) => setActs(acts.map((x, j) => (j === i ? { ...x, kcal: e.target.value } : x)))} />kcal</label>
+            </div>
+          ))}
+          <span className="muted small">Calculado con tu peso ({fmt(lastWeight, 1)} kg). Si cambiás los minutos, recalcula.</span>
+        </section>
+      )}
+
+      {Object.keys(extras).length > 0 && (
         <section className="card stack8">
           <span className="cardtitle">También anoto</span>
           {[['agua', 'Agua', 'ml'], ['peso', 'Peso', 'kg'], ['cintura', 'Cintura', 'cm']].map(([k, l, u]) => extras[k] && (

@@ -32,6 +32,9 @@ export default function Reports() {
     const fat = avg(full, (x) => x.fat_g);
     const fiber = avg(full, (x) => x.fiber_g);
     const alc = rows.reduce((s, x) => s + (x.alcohol_g || 0), 0);
+    const actKcal = rows.reduce((s, x) => s + (x.actividad || 0), 0);
+    const actMin = rows.reduce((s, x) => s + (x.act_min || 0), 0);
+    const actDias = rows.filter((x) => x.actividad > 0).length;
     const waterDays = rows.filter((x) => x.agua > 0);
     const water = avg(rows.filter((x) => x.k !== dayKey() || x.agua > 0), (x) => x.agua);
     const inGoal = full.filter((x) => x.kcal <= goal * 1.05).length;
@@ -70,7 +73,7 @@ export default function Reports() {
       wEnd = addDays(wEnd, -7);
     }
 
-    return { days, rows, logged, full, kcal, prot, carbs, fat, fiber, alc, water, waterDays, inGoal, wChange, trIn, ws, g, deficit, top, totalKcal, weeks };
+    return { actKcal, actMin, actDias, days, rows, logged, full, kcal, prot, carbs, fat, fiber, alc, water, waterDays, inGoal, wChange, trIn, ws, g, deficit, top, totalKcal, weeks };
   }, [n, totals, metrics, meals, goal, profile, lastWeight]);
 
   const tips = useMemo(() => reglas(r, profile, { goal, waterGoal, limit, n }), [r, profile, goal, waterGoal, limit, n]);
@@ -84,6 +87,7 @@ export default function Reports() {
         metas: { kcal: goal, proteinas_g: profile.protein_goal, agua_ml: waterGoal, tragos_semana: limit },
         promedios_diarios: { kcal: Math.round(r.kcal || 0), proteinas_g: Math.round(r.prot || 0), carbos_g: Math.round(r.carbs || 0), grasas_g: Math.round(r.fat || 0), fibra_g: Math.round(r.fiber || 0), agua_ml: Math.round(r.water || 0) },
         gasto_estimado_kcal: r.g?.tdee, dias_dentro_de_meta: r.inGoal,
+        actividad: { minutos_total: Math.round(r.actMin), kcal_total: Math.round(r.actKcal), dias_con_actividad: r.actDias },
         alcohol_tragos_total: Math.round(tragos(r.alc) * 10) / 10,
         cambio_peso_tendencia_kg: r.wChange != null ? Math.round(r.wChange * 10) / 10 : null,
         calorias_por_dia: r.rows.map((x) => ({ dia: x.k, kcal: Math.round(x.kcal || 0), comidas: x.comidas || 0 })),
@@ -114,6 +118,7 @@ export default function Reports() {
         <div className="card kpi"><span className="muted small">Peso (tendencia)</span><span className={'kpi-num' + (r.wChange < 0 ? ' accent' : '')}>{r.wChange == null ? '–' : `${r.wChange > 0 ? '+' : ''}${fmt(r.wChange, 1)} kg`}</span><span className="muted small">en {n} días</span></div>
         <div className="card kpi"><span className="muted small">Proteínas</span><span className="kpi-num">{fmt(r.prot)} g</span><span className="muted small">meta {fmt(profile.protein_goal)} g por día</span></div>
         <div className="card kpi"><span className="muted small">Agua</span><span className="kpi-num">{fmtL(r.water)}</span><span className="muted small">por día · meta {fmtL(waterGoal)}</span></div>
+        <div className="card kpi"><span className="muted small">Actividad física</span><span className="kpi-num">{fmt(r.actMin / (n / 7))} min</span><span className="muted small">por semana · {fmt(r.actKcal)} kcal en {r.actDias} días</span></div>
         <div className="card kpi"><span className="muted small">Alcohol</span><span className="kpi-num">{fmt(tragos(r.alc) / (n / 7), 1)}</span><span className="muted small">tragos por semana · máx. {fmt(limit)}</span></div>
       </div>
 
@@ -146,6 +151,12 @@ export default function Reports() {
             <div className="row gap12 wrap small">{kcalSplit.map((x) => <span key={x.l} className="row gap6"><span className="dot" style={{ background: x.c }} />{x.l} {fmt(x.v * 100)}%</span>)}</div>
             <span className="muted small">Promedio por día: {fmt(r.prot)} g proteínas · {fmt(r.carbs)} g carbohidratos · {fmt(r.fat)} g grasas · {fmt(r.fiber)} g fibra.</span>
           </> : <p className="muted small">Todavía no hay comidas en este período.</p>}
+        </section>
+
+        <section className="card stack12">
+          <span className="cardtitle">Calorías quemadas en actividad</span>
+          {r.actKcal > 0 ? <BarChart data={r.rows.map((x) => ({ label: shortDate(x.k), value: Math.round(x.actividad || 0), color: 'var(--act)' }))} unit="kcal" />
+            : <p className="muted small">Todavía no registraste actividad en este período. Decila por voz como una comida: "caminé 40 minutos".</p>}
         </section>
 
         <section className="card stack12">
