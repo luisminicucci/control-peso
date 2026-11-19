@@ -50,17 +50,21 @@ async function ia<T extends z.ZodType>(system: string, user: string, schema: T, 
 async function gemini<T extends z.ZodType>(system: string, user: string, schema: T): Promise<z.infer<T>> {
   const key = Deno.env.get('GEMINI_API_KEY');
   const jsonSchema = z.toJSONSchema(schema);
+  // Primer intento: con esquema y sin "pensar" (más rápido). Si el modelo no acepta algo, reintenta simple.
   const call = (withSchema: boolean) => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key! },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: withSchema ? system : `${system}\n\nRespondé SOLO con un JSON que cumpla este esquema:\n${JSON.stringify(jsonSchema)}` }] },
       contents: [{ role: 'user', parts: [{ text: user }] }],
-      generationConfig: { temperature: 0.2, responseMimeType: 'application/json', ...(withSchema ? { responseJsonSchema: jsonSchema } : {}) }
-    })
+      generationConfig: { temperature: 0.2, responseMimeType: 'application/json', ...(withSchema ? { responseJsonSchema: jsonSchema, thinkingConfig: { thinkingBudget: 0 } } : {}) }
+    }),
+    signal: AbortSignal.timeout(40000)
   });
+  const t0 = Date.now();
   let r = await call(true);
-  if (r.status === 400) r = await call(false); // por si el modelo no acepta el esquema
+  if (r.status === 400) { console.log('gemini 400 con esquema:', (await r.text()).slice(0, 300)); r = await call(false); }
+  console.log('gemini', GEMINI_MODEL, r.status, `${Date.now() - t0} ms`);
   if (r.status === 429) throw Object.assign(new Error('rate'), { status: 429 });
   if (r.status === 400 || r.status === 403) throw new Error('La clave de Gemini no es válida o el modelo no está disponible. Revisá GEMINI_API_KEY.');
   if (!r.ok) throw new Error(`Gemini respondió ${r.status}: ${(await r.text()).slice(0, 200)}`);
@@ -257,6 +261,7 @@ Deno.serve(async (req) => {
     const status = (err as { status?: number }).status;
     if (status === 401) return json({ error: 'La clave de la IA no es válida. Revisala en los secretos de Supabase.' }, 500);
     if (status === 429) return json({ error: 'La IA está saturada, probá en un minuto.' }, 503);
+    if ((err as Error).name === 'TimeoutError') return json({ error: 'La IA tardó demasiado en responder. Probá de nuevo.' }, 504);
     return json({ error: (err as Error).message || String(err) }, 500);
   }
 });

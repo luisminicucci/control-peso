@@ -23,12 +23,13 @@ async function fetchAll(query) {
 
 // Llama a la función del servidor (IA, notificaciones).
 export async function api(action, payload = {}) {
-  const { data, error } = await supabase.functions.invoke('peso-api', { body: { action, ...payload } });
+  const { data, error } = await supabase.functions.invoke('peso-api', { body: { action, ...payload }, timeout: 45000 });
   if (error) {
     let msg = error.message;
     const status = error.context?.status;
     try { const b = await error.context?.clone?.().json(); if (b?.error) msg = b.error; else if (b?.msg || b?.message) msg = b.msg || b.message; } catch { /* sin cuerpo */ }
-    if (error.name === 'FunctionsFetchError') msg = 'No se pudo conectar con la función peso-api. Revisá que exista en Supabase con ese nombre exacto.';
+    if (/abort|timeout/i.test(msg + ' ' + (error.context?.name || '') + ' ' + (error.context?.message || ''))) msg = 'La IA tardó demasiado en responder (más de 45 segundos). Probá de nuevo; si se repite, revisá los Logs de peso-api.';
+    else if (error.name === 'FunctionsFetchError') msg = 'No se pudo conectar con la función peso-api. Revisá que exista en Supabase con ese nombre exacto.';
     else if (status === 404) msg = 'No existe la función peso-api en Supabase (404).';
     else if (status === 401 && !/sesión|clave/i.test(msg)) msg = 'La función rechazó el pedido (401). Apagá "Verify JWT" en los ajustes de peso-api.';
     else if (status && !/\(\d{3}\)/.test(msg)) msg += ` (${status})`;
