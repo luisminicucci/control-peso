@@ -146,3 +146,48 @@ export const tragos = (g) => (g || 0) / 10;
 export function lastNDays(n, end = dayKey()) {
   return Array.from({ length: n }, (_, i) => addDays(end, i - n + 1));
 }
+
+// ───────── Comidas frecuentes ─────────
+
+const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+const ITEM_KEYS = ['name', 'quantity', 'unit', 'grams', 'kcal', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g', 'alcohol_g'];
+export const copyItem = (it) => Object.fromEntries(ITEM_KEYS.map((k) => [k, it[k] ?? null]));
+
+// Comidas completas que se repiten (mismos alimentos), priorizando el tipo de comida actual.
+export function frequentMeals(meals, mealType, max = 6) {
+  const by = new Map();
+  for (const m of meals) {
+    if (!m.items?.length) continue;
+    const key = m.items.map((i) => norm(i.name)).sort().join('|');
+    const g = by.get(key) || { key, n: 0, tipo: 0, last: 0, meal: null };
+    const t = new Date(m.eaten_at).getTime();
+    g.n++;
+    if (m.meal_type === mealType) g.tipo++;
+    if (t > g.last) { g.last = t; g.meal = m; }
+    by.set(key, g);
+  }
+  const ahora = Date.now();
+  return [...by.values()]
+    .map((g) => ({ ...g, score: g.n + g.tipo * 2 + (ahora - g.last < 3 * 864e5 ? 1 : 0) }))
+    .filter((g) => g.n >= 2 || g.tipo >= 1)
+    .sort((a, b) => b.score - a.score || b.last - a.last)
+    .slice(0, max)
+    .map((g) => ({ key: g.key, veces: g.n, meal: g.meal, kcal: Math.round(sumItems(g.meal.items).kcal), nombre: g.meal.items.map((i) => i.name).join(' + ') }));
+}
+
+// Alimentos sueltos ya registrados que coinciden con lo que se escribe.
+export function matchFoods(meals, q, max = 5) {
+  const qq = norm(q);
+  if (qq.length < 2) return [];
+  const by = new Map();
+  for (const m of meals) for (const it of m.items || []) {
+    const k = norm(it.name);
+    if (!k.includes(qq)) continue;
+    const g = by.get(k) || { n: 0, last: 0, item: it };
+    const t = new Date(m.eaten_at).getTime();
+    g.n++;
+    if (t > g.last) { g.last = t; g.item = it; }
+    by.set(k, g);
+  }
+  return [...by.values()].sort((a, b) => (norm(b.item.name).startsWith(qq) - norm(a.item.name).startsWith(qq)) || b.n - a.n).slice(0, max).map((g) => ({ ...g.item, veces: g.n }));
+}

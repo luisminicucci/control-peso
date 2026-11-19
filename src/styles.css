@@ -277,3 +277,10 @@ code { background: var(--line-soft); padding: 2px 6px; border-radius: 6px; }
 .mini-l .mini { width: 74px; }
 .act-l { color: #7FE0B0; }
 .actline { padding: 4px 0; border-bottom: 1px solid var(--line-soft); }
+
+/* Comidas frecuentes y sugerencias */
+.freq, .suggest-it { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; min-height: 48px; padding: 10px 14px; border-radius: 14px; border: 1.5px solid var(--line); background: var(--surface); font: inherit; color: inherit; cursor: pointer; }
+.freq svg { color: var(--accent); flex: none; }
+.freq:active, .suggest-it:active { background: var(--accent-soft); }
+.suggest { display: flex; flex-direction: column; gap: 6px; }
+.suggest-it { min-height: 42px; padding: 8px 12px; }

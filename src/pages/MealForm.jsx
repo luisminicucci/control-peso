@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, useStore } from '../store.jsx';
-import { MEAL_TYPES, dayKey, fmt, guessMealType, nowLocalString, num, sumItems, toLocalInput } from '../lib.js';
+import { MEAL_TYPES, copyItem, dayKey, fmt, frequentMeals, guessMealType, matchFoods, mealLabel, nowLocalString, num, sumItems, toLocalInput } from '../lib.js';
 import { Icon, speechSupported, useSpeech } from '../ui.jsx';
 
 const NUTS = [
@@ -96,6 +96,21 @@ export default function MealForm() {
     }));
   }
 
+  const frecuentes = useMemo(() => (existing ? [] : frequentMeals(meals, mealType)), [meals, mealType, existing]);
+  const parecidos = useMemo(() => matchFoods(meals, draft), [meals, draft]);
+
+  function repetir(m) {
+    setItems((prev) => [...prev, ...m.items.map(copyItem)]);
+    if (!items.length) setMealType(m.meal_type);
+    setText((prev) => prev || m.items.map((i) => i.name).join(', '));
+    setSource('frecuente');
+  }
+  function sumarAlimento(it) {
+    setItems((prev) => [...prev, copyItem(it)]);
+    setDraft('');
+    if (source !== 'voz') setSource('frecuente');
+  }
+
   const total = useMemo(() => sumItems(items.map((i) => Object.fromEntries(Object.entries(i).map(([k, v]) => [k, num(v) ?? v])))), [items]);
 
   async function guardar() {
@@ -160,6 +175,31 @@ export default function MealForm() {
           <Icon name="sparkle" size={18} />Analizar
         </button>
       </div>
+
+      {parecidos.length > 0 && busy !== 'ia' && (
+        <div className="suggest">
+          <span className="muted small">Ya lo anotaste antes (tocá para sumarlo tal cual):</span>
+          {parecidos.map((it) => (
+            <button key={it.name} type="button" className="suggest-it" onClick={() => sumarAlimento(it)}>
+              <span className="grow">{it.name} <span className="muted small">· {fmt(it.quantity, 0)} {it.unit}</span></span>
+              <span className="strong small">{fmt(it.kcal)} kcal</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {frecuentes.length > 0 && items.length === 0 && !speech.listening && busy !== 'ia' && (
+        <section className="stack8">
+          <span className="cardtitle">Lo que solés comer{mealType ? ` en ${mealLabel(mealType).toLowerCase()}` : ''}</span>
+          {frecuentes.map((f) => (
+            <button key={f.key} type="button" className="freq" onClick={() => repetir(f.meal)}>
+              <Icon name="plus" size={18} />
+              <span className="grow">{f.nombre}<span className="muted small"> · {f.veces} {f.veces === 1 ? 'vez' : 'veces'}</span></span>
+              <span className="strong small">{fmt(f.kcal)} kcal</span>
+            </button>
+          ))}
+        </section>
+      )}
 
       {text && <p className="muted small">“{text}”</p>}
       {note && <p className="note small">{note}</p>}
