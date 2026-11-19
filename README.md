@@ -17,7 +17,9 @@ Usa el mismo proyecto de Supabase que *Gastos en Familia* (tablas aparte, con pr
 
 1. **Tablas**: en Supabase, *SQL Editor* → *New query*, pegar el contenido de [`supabase/schema.sql`](supabase/schema.sql) y tocar *Run*.
 2. **Función del servidor**: *Edge Functions* → *Deploy a new function* → *Via Editor*. Nombre: `peso-api`. Pegar el contenido de [`supabase/functions/peso-api/index.ts`](supabase/functions/peso-api/index.ts) y tocar *Deploy function*. Después, en los ajustes de la función, **desactivar "Verify JWT"** (la función verifica el usuario por su cuenta; hace falta para los recordatorios).
-3. **Clave de Anthropic**: crearla en [console.anthropic.com](https://console.anthropic.com/settings/keys) y cargarla en Supabase, *Edge Functions* → *Secrets*, con el nombre `ANTHROPIC_API_KEY`. Nunca va en la web.
+3. **Clave de la IA** (se carga en Supabase, *Edge Functions* → *Secrets*; nunca va en la web). Una de las dos:
+   - **Gratis (Gemini):** crear la clave en [aistudio.google.com/apikey](https://aistudio.google.com/apikey) y cargarla como `GEMINI_API_KEY`.
+   - **Claude Haiku:** crear la clave en [console.anthropic.com](https://console.anthropic.com/settings/keys) y cargarla como `ANTHROPIC_API_KEY`. Si están las dos, usa Haiku (se puede forzar con `AI_PROVIDER` = `gemini` o `anthropic`).
 4. **GitHub Pages**: en *Settings › Pages*, elegir *Source: GitHub Actions*. Cada cambio en `main` se publica solo.
 
 Opcional: el secreto `ALLOWED_EMAILS` (emails separados por coma) limita quién puede usar la IA.
@@ -36,4 +38,4 @@ npm install
 npm run dev
 ```
 
-Hecho con React + Vite + Supabase + Claude Haiku.
+Hecho con React + Vite + Supabase + Claude Haiku (o Gemini).

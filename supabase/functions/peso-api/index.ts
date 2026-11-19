@@ -1,9 +1,9 @@
 // Función del servidor para Control de Peso (Supabase Edge Function "peso-api").
-// - action "analizar": convierte lo que dijiste ("me comí dos empanadas...") en alimentos con nutrientes, usando Claude Haiku.
+// - action "analizar": convierte lo que dijiste ("me comí dos empanadas...") en alimentos con nutrientes, con Claude Haiku o Gemini.
 // - action "consejos": mira el resumen de tus últimos días y devuelve sugerencias para bajar de peso.
 // - action "push-key": devuelve la clave pública para activar notificaciones en el celular.
 // - action "cron": la llama la base cada 15 minutos para mandar los recordatorios de agua.
-// La clave de Anthropic queda solo acá (secreto ANTHROPIC_API_KEY), nunca en la web.
+// Las claves de IA quedan solo acá (secretos ANTHROPIC_API_KEY o GEMINI_API_KEY), nunca en la web.
 
 import Anthropic from 'npm:@anthropic-ai/sdk@1.3.0';
 import { zodOutputFormat } from 'npm:@anthropic-ai/sdk@1.3.0/helpers/zod';
@@ -12,6 +12,58 @@ import { createClient } from 'npm:@supabase/supabase-js@2.119.0';
 import webpush from 'npm:web-push@3.6.7';
 
 const MODEL = 'claude-haiku-5-5';
+// Proveedor de IA: si está la clave de Anthropic usa Claude Haiku; si no, Gemini (plan gratis de Google).
+// Se puede forzar con el secreto AI_PROVIDER = "anthropic" o "gemini".
+const GEMINI_MODEL = Deno.env.get('GEMINI_MODEL') || 'gemini-flash-latest';
+function provider() {
+  const forced = (Deno.env.get('AI_PROVIDER') || '').toLowerCase();
+  if (forced === 'anthropic' || forced === 'gemini') return forced;
+  if (Deno.env.get('ANTHROPIC_API_KEY')) return 'anthropic';
+  if (Deno.env.get('GEMINI_API_KEY')) return 'gemini';
+  return null;
+}
+
+// Pide a la IA una respuesta JSON que cumpla el esquema.
+async function ia<T extends z.ZodType>(system: string, user: string, schema: T, effort: 'low' | 'medium', maxTokens: number): Promise<z.infer<T>> {
+  if (provider() === 'gemini') return gemini(system, user, schema);
+  const client = new Anthropic();
+  const res = await client.messages.parse({
+    model: MODEL,
+    max_tokens: maxTokens,
+    output_config: { effort, format: zodOutputFormat(schema) },
+    system,
+    messages: [{ role: 'user', content: user }]
+  });
+  if (res.stop_reason === 'refusal') throw new Error('La IA no pudo procesar ese texto.');
+  if (!res.parsed_output) throw new Error('La IA no devolvió un resultado válido. Probá de nuevo.');
+  return res.parsed_output as z.infer<T>;
+}
+
+async function gemini<T extends z.ZodType>(system: string, user: string, schema: T): Promise<z.infer<T>> {
+  const key = Deno.env.get('GEMINI_API_KEY');
+  const jsonSchema = z.toJSONSchema(schema);
+  const call = (withSchema: boolean) => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key! },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: withSchema ? system : `${system}\n\nRespondé SOLO con un JSON que cumpla este esquema:\n${JSON.stringify(jsonSchema)}` }] },
+      contents: [{ role: 'user', parts: [{ text: user }] }],
+      generationConfig: { temperature: 0.2, responseMimeType: 'application/json', ...(withSchema ? { responseJsonSchema: jsonSchema } : {}) }
+    })
+  });
+  let r = await call(true);
+  if (r.status === 400) r = await call(false); // por si el modelo no acepta el esquema
+  if (r.status === 429) throw Object.assign(new Error('rate'), { status: 429 });
+  if (r.status === 400 || r.status === 403) throw new Error('La clave de Gemini no es válida o el modelo no está disponible. Revisá GEMINI_API_KEY.');
+  if (!r.ok) throw new Error(`Gemini respondió ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  const data = await r.json();
+  const text = (data.candidates?.[0]?.content?.parts || []).map((p: { text?: string }) => p.text || '').join('');
+  let obj: unknown;
+  try { obj = JSON.parse(text.replace(/^```(json)?|```$/g, '').trim()); } catch { throw new Error('La IA no devolvió un resultado válido. Probá de nuevo.'); }
+  const parsed = schema.safeParse(obj);
+  if (!parsed.success) { console.error('gemini schema', parsed.error, text); throw new Error('La IA devolvió datos incompletos. Probá de nuevo.'); }
+  return parsed.data;
+}
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -63,17 +115,7 @@ Reglas:
 - Redondeá kcal a enteros y macros a 1 decimal. Sé realista, ni optimista ni exagerado.`;
 
 async function analizar(texto: string, ahora: string) {
-  const client = new Anthropic();
-  const res = await client.messages.parse({
-    model: MODEL,
-    max_tokens: 4000,
-    output_config: { effort: 'low', format: zodOutputFormat(Analisis) },
-    system: SYSTEM_ANALIZAR,
-    messages: [{ role: 'user', content: `Fecha y hora local ahora: ${ahora}\nLo que dijo: "${texto}"` }]
-  });
-  if (res.stop_reason === 'refusal') throw new Error('La IA no pudo procesar ese texto.');
-  if (!res.parsed_output) throw new Error('La IA no devolvió un resultado válido. Probá de nuevo.');
-  return res.parsed_output;
+  return ia(SYSTEM_ANALIZAR, `Fecha y hora local ahora: ${ahora}\nLo que dijo: "${texto}"`, Analisis, 'low', 4000);
 }
 
 // ───────────────────────── IA: consejos ─────────────────────────
@@ -83,20 +125,13 @@ const Consejos = z.object({
   consejos: z.array(z.string()).describe('Entre 3 y 5 sugerencias concretas y accionables')
 });
 
-async function consejos(datos: unknown) {
-  const client = new Anthropic();
-  const res = await client.messages.parse({
-    model: MODEL,
-    max_tokens: 3000,
-    output_config: { effort: 'medium', format: zodOutputFormat(Consejos) },
-    system: `Sos un nutricionista argentino, cercano y directo, que acompaña a alguien que quiere bajar de peso.
+const SYSTEM_CONSEJOS = `Sos un nutricionista argentino, cercano y directo, que acompaña a alguien que quiere bajar de peso.
 Te pasan un resumen de sus últimos días (calorías, macros, agua, alcohol, peso y cintura, comidas frecuentes).
 Hablá de vos, en castellano rioplatense, sin sermones. Basate solo en los datos. Sugerencias concretas (qué cambiar, por qué y cómo), con alimentos argentinos comunes.
-No des indicaciones médicas; si algo parece riesgoso (muy pocas calorías, mucho alcohol), sugerí consultarlo con un profesional.`,
-    messages: [{ role: 'user', content: JSON.stringify(datos) }]
-  });
-  if (!res.parsed_output) throw new Error('La IA no devolvió consejos. Probá de nuevo.');
-  return res.parsed_output;
+No des indicaciones médicas; si algo parece riesgoso (muy pocas calorías, mucho alcohol), sugerí consultarlo con un profesional.`;
+
+async function consejos(datos: unknown) {
+  return ia(SYSTEM_CONSEJOS, JSON.stringify(datos), Consejos, 'medium', 3000);
 }
 
 // ───────────────────────── Notificaciones ─────────────────────────
@@ -197,8 +232,8 @@ Deno.serve(async (req) => {
     const allowed = (Deno.env.get('ALLOWED_EMAILS') || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
     if (allowed.length && !allowed.includes((u.user.email || '').toLowerCase())) return json({ error: 'Usuario no habilitado.' }, 403);
 
-    if (!Deno.env.get('ANTHROPIC_API_KEY') && (action === 'analizar' || action === 'consejos')) {
-      return json({ error: 'Falta cargar la clave de Anthropic (ANTHROPIC_API_KEY) en los secretos de Supabase.' }, 500);
+    if (!provider() && (action === 'analizar' || action === 'consejos')) {
+      return json({ error: 'Falta cargar la clave de la IA en los secretos de Supabase: GEMINI_API_KEY (gratis) o ANTHROPIC_API_KEY.' }, 500);
     }
     if (action === 'analizar') {
       const texto = String(body.texto || '').trim().slice(0, 2000);
@@ -210,7 +245,7 @@ Deno.serve(async (req) => {
   } catch (err) {
     console.error(err);
     const status = (err as { status?: number }).status;
-    if (status === 401) return json({ error: 'La clave de Anthropic no es válida. Revisala en los secretos de Supabase.' }, 500);
+    if (status === 401) return json({ error: 'La clave de la IA no es válida. Revisala en los secretos de Supabase.' }, 500);
     if (status === 429) return json({ error: 'La IA está saturada, probá en un minuto.' }, 503);
     return json({ error: (err as Error).message || String(err) }, 500);
   }
