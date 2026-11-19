@@ -102,7 +102,7 @@ export function FastCard() {
         <span className="cardtitle row gap6"><Icon name="clock" size={18} className="fast-ic" />Ayuno intermitente</span>
         {desdeComida != null && <span className="muted small">última comida hace {horasMin(desdeComida)}</span>}
       </div>
-      <div className="chiprow">
+      <div className="fastchips">
         <button type="button" className={'pill small' + (target === 0 ? ' on' : '')} onClick={() => setTarget(0)}>Libre</button>
         {PROTOCOLOS.map((h) => <button key={h} type="button" className={'pill small' + (target === h ? ' on' : '')} onClick={() => setTarget(h)}>{h}:{24 - h > 0 ? 24 - h : 0}</button>)}
       </div>
